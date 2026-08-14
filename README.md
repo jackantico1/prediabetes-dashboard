@@ -1,3 +1,12 @@
+## What is this Jack
+
+This is an app for people to beat their pre-diabeates. Ideally it can connect to several different data sources:
+
+-- Garmin, apple watches for activity and sleep quality
+-- Manually entering in blood glucose
+-- manually uploading other blood work to get a better picture of health
+-- connecting to food data somehow
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
