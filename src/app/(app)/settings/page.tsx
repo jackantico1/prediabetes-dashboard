@@ -1,6 +1,10 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/repo/settings";
 import { hasDemoData } from "@/lib/demo/seed";
+import { getGarminConnection } from "@/lib/repo/garmin";
+import { garminAvailable } from "@/lib/garmin/sync";
+import { aiConfigured } from "@/lib/ai/client";
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { SignOutButton } from "@/components/settings/SignOutButton";
@@ -12,7 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const [settings, demo] = await Promise.all([getSettings(user.id), hasDemoData(user.id)]);
+  const [settings, demo, garmin] = await Promise.all([getSettings(user.id), hasDemoData(user.id), getGarminConnection(user.id)]);
 
   return (
     <>
@@ -21,6 +25,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {sp.saved && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2">Targets saved.</p>}
       {sp.error && <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-2">Those targets didn&apos;t look right. Please check the ranges.</p>}
       {sp.demo === "cleared" && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2">Sample data removed. Your own entries were kept.</p>}
+
+      <Card title="Data sources">
+        <ul className="divide-y divide-slate-100 text-sm">
+          <li className="py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="font-medium text-slate-800">Garmin</p>
+              <p className="text-xs text-slate-500">
+                {garmin ? `Connected${garmin.garminDisplayName ? ` as ${garmin.garminDisplayName}` : ""}${garmin.lastSyncAt ? ` · last sync ${garmin.lastSyncAt.toLocaleDateString()}` : ""}` : garminAvailable() ? "Not connected" : "Not set up on this server"}
+              </p>
+            </div>
+            <Link href="/activity" className="btn-secondary">{garmin ? "Manage" : "Connect"}</Link>
+          </li>
+          <li className="py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="font-medium text-slate-800">Claude (meal estimates, PDF reading)</p>
+              <p className="text-xs text-slate-500">{aiConfigured() ? "Configured" : "Not configured: add ANTHROPIC_API_KEY on the server"}</p>
+            </div>
+          </li>
+        </ul>
+      </Card>
 
       <Card title="Targets" subtitle="Used for colors, streaks and coaching. Defaults follow common clinical guidance for prediabetes.">
         <form action={saveTargets} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
