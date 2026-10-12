@@ -18,3 +18,11 @@ export async function requireUser(): Promise<CurrentUser> {
   const { id, name, email } = session.user;
   return { id, name, email };
 }
+
+/** For route handlers: the signed-in user, or null (caller returns 401). */
+export async function getCurrentUser(): Promise<CurrentUser | null> {
+  const session = await getSession();
+  if (!session?.user) return null;
+  const { id, name, email } = session.user;
+  return { id, name, email };
+}
