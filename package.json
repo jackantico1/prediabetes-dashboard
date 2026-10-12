@@ -3,27 +3,39 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dev:garmin": "bash scripts/dev-garmin.sh",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@electric-sql/pglite": "^0.5.9",
+    "@neondatabase/serverless": "^1.2.0",
+    "better-auth": "^1.7.7",
     "date-fns": "^4.4.0",
-    "lightningcss-darwin-x64": "^1.32.0",
+    "drizzle-orm": "^0.45.4",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.4"
   }
 }

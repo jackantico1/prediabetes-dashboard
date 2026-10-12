@@ -35,11 +35,12 @@ export function WeeklyCorrelation({ data }: Props) {
           <YAxis yAxisId="glucose" domain={[80, 160]} tick={{ fontSize: 11, fill: "#94a3b8" }} unit="mg" />
           <YAxis yAxisId="sleep" orientation="right" domain={[0, 10]} tick={{ fontSize: 11, fill: "#94a3b8" }} unit="h" />
           <Tooltip
-            formatter={(val: number, name: string) =>
-              name === "Avg Glucose" ? [`${val} mg/dL`, name] :
-              name === "Sleep" ? [`${val}h`, name] :
-              [`${val.toLocaleString()}`, name]
-            }
+            formatter={(v, name) => {
+              const val = Number(v);
+              if (name === "Avg Glucose") return [`${val} mg/dL`, name];
+              if (name === "Sleep") return [`${val}h`, name];
+              return [val.toLocaleString(), name];
+            }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           <Bar yAxisId="glucose" dataKey="avgGlucose" name="Avg Glucose" fill="#bfdbfe" radius={[4, 4, 0, 0]} />

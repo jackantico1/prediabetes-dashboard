@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local database (PGlite)
+/.data/
+
+# python
+__pycache__/
+.venv/
+*.pyc
