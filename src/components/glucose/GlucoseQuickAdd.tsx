@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addReading } from "@/app/(app)/glucose/actions";
 import type { GlucoseTag } from "@/db/schema";
@@ -20,6 +20,8 @@ function nowLocal() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const noopSubscribe = () => () => {};
+
 function defaultTag(): GlucoseTag {
   const h = new Date().getHours();
   return h < 10 ? "fasting" : "other";
@@ -28,13 +30,12 @@ function defaultTag(): GlucoseTag {
 export function GlucoseQuickAdd({ autoFocus = false, mealId, defaultTagOverride, onSaved }: { autoFocus?: boolean; mealId?: string; defaultTagOverride?: GlucoseTag; onSaved?: () => void }) {
   const router = useRouter();
   const [value, setValue] = useState("");
-  const [tag, setTag] = useState<GlucoseTag>(defaultTagOverride ?? "other");
-  const [ts, setTs] = useState("");
-  // Time-dependent defaults are set after mount so server and client HTML match.
-  useEffect(() => {
-    setTs(nowLocal());
-    if (!defaultTagOverride) setTag(defaultTag());
-  }, [defaultTagOverride]);
+  // Time-dependent defaults are derived only after mount so server and client HTML match.
+  const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  const [tagChoice, setTag] = useState<GlucoseTag | null>(defaultTagOverride ?? null);
+  const tag: GlucoseTag = tagChoice ?? (mounted ? defaultTag() : "other");
+  const [tsInput, setTs] = useState("");
+  const ts = tsInput || (mounted ? nowLocal() : "");
   const [note, setNote] = useState("");
   const [showMore, setShowMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +53,7 @@ export function GlucoseQuickAdd({ autoFocus = false, mealId, defaultTagOverride,
       }
       setValue("");
       setNote("");
-      setTs(nowLocal());
+      setTs("");
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
       onSaved?.();
@@ -110,7 +111,7 @@ export function GlucoseQuickAdd({ autoFocus = false, mealId, defaultTagOverride,
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label" htmlFor="glucose-ts">Time</label>
-            <input id="glucose-ts" className="input" type="datetime-local" value={ts} max={nowLocal()} onChange={(e) => setTs(e.target.value)} />
+            <input id="glucose-ts" className="input" type="datetime-local" value={ts} max={mounted ? nowLocal() : undefined} onChange={(e) => setTs(e.target.value)} />
           </div>
           <div>
             <label className="label" htmlFor="glucose-note">Note</label>
