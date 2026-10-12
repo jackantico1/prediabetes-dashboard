@@ -1,67 +1,69 @@
 "use client";
 
+import { useState } from "react";
 import type { CoachingAction, HabitStreak } from "@/lib/coaching/engine";
 
-const priorityStyles = {
-  high: "bg-red-50 border-red-200 text-red-700",
-  medium: "bg-amber-50 border-amber-200 text-amber-700",
-  low: "bg-slate-50 border-slate-200 text-slate-600",
+const priorityStyles: Record<CoachingAction["priority"], string> = {
+  high: "bg-rose-50 border-rose-200",
+  medium: "bg-amber-50 border-amber-200",
+  low: "bg-slate-50 border-slate-200",
 };
-
-const categoryIcon: Record<string, string> = {
+const priorityLabel: Record<CoachingAction["priority"], string> = { high: "Start here", medium: "This week", low: "Keep going" };
+const icon: Record<CoachingAction["category"], string> = {
   glucose: "🩸",
   sleep: "🌙",
   activity: "🏃",
   meal: "🥗",
-  general: "🎯",
+  labs: "🧪",
+  logging: "✍️",
 };
 
-interface Props {
-  actions: CoachingAction[];
-  streaks: HabitStreak[];
+export function ActionList({ actions, limit }: { actions: CoachingAction[]; limit?: number }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const shown = limit ? actions.slice(0, limit) : actions;
+  if (!shown.length) return null;
+  return (
+    <ul className="space-y-3">
+      {shown.map((a) => {
+        const expanded = open === a.id;
+        return (
+          <li key={a.id} className={`rounded-xl border p-4 ${priorityStyles[a.priority]}`}>
+            <button type="button" onClick={() => setOpen(expanded ? null : a.id)} className="w-full text-left flex items-start gap-3" aria-expanded={expanded}>
+              <span className="text-xl mt-0.5" aria-hidden>{icon[a.category]}</span>
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm text-slate-800">{a.title}</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/70 border border-black/5 text-slate-600 font-medium">{priorityLabel[a.priority]}</span>
+                </span>
+                <span className="block text-sm text-slate-700 mt-1">{a.detail}</span>
+                {a.evidence && <span className="block text-xs text-slate-500 mt-1">{a.evidence}</span>}
+                {expanded && <span className="block text-sm text-slate-700 mt-2 pt-2 border-t border-black/5"><span className="font-medium">Why it matters: </span>{a.why}</span>}
+              </span>
+              <span className="text-slate-400 text-sm mt-1" aria-hidden>{expanded ? "−" : "+"}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
-export function CoachingPanel({ actions, streaks }: Props) {
+export function Streaks({ streaks }: { streaks: HabitStreak[] }) {
+  if (!streaks.length) return null;
   return (
-    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-6 space-y-6">
-      <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-400">Your Action Plan</h2>
-
-      <div className="space-y-3">
-        {actions.map((a) => (
-          <div key={a.id} className={`rounded-xl border p-4 ${priorityStyles[a.priority]}`}>
-            <div className="flex items-start gap-3">
-              <span className="text-xl mt-0.5">{categoryIcon[a.category]}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-semibold text-sm">{a.title}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize border ${priorityStyles[a.priority]}`}>
-                    {a.priority}
-                  </span>
-                </div>
-                <p className="text-xs mt-1 opacity-80">{a.detail}</p>
-                {a.evidence && <p className="text-xs mt-1 opacity-60 italic">Evidence: {a.evidence}</p>}
-                <p className="text-xs mt-1 font-medium">Impact: {a.impact}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Habit Streaks</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {streaks.map((s) => (
-            <div key={s.habit} className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
-              <p className="text-2xl font-bold text-blue-600">{s.currentStreak}<span className="text-sm font-normal text-slate-400"> days</span></p>
-              <p className="text-xs font-medium text-slate-700 mt-0.5">{s.habit}</p>
-              <p className="text-xs text-slate-400">Best: {s.bestStreak}d</p>
-              <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full ${s.completedToday ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                {s.completedToday ? "✓ Today" : "Not yet today"}
-              </span>
-            </div>
-          ))}
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {streaks.map((s) => (
+        <div key={s.id} className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
+          <p className="text-2xl font-bold text-teal-700 tabular-nums">
+            {s.currentStreak}
+            <span className="text-sm font-normal text-slate-400"> {s.currentStreak === 1 ? "day" : "days"}</span>
+          </p>
+          <p className="text-xs font-medium text-slate-700 mt-0.5">{s.habit}</p>
+          <span className={`inline-block mt-1.5 text-[11px] px-2 py-0.5 rounded-full ${s.completedToday ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
+            {s.completedToday ? "✓ Done today" : "Not yet today"}
+          </span>
         </div>
-      </div>
+      ))}
     </div>
   );
 }

@@ -1,135 +1,222 @@
-import type { GlucoseReading, SleepRecord, ActivityRecord, MealRecord } from "../adapters/types";
+import type { DailyHealth, GlucoseReading, LabResult, UserSettings } from "@/db/schema";
+import { localDate, shiftDate } from "@/lib/time";
+import type { GlucoseStats } from "@/lib/glucose/stats";
+import type { MealWithResponse } from "@/lib/food/pairing";
 
 export interface CoachingAction {
   id: string;
   priority: "high" | "medium" | "low";
-  category: "glucose" | "sleep" | "activity" | "meal" | "general";
+  category: "glucose" | "sleep" | "activity" | "meal" | "labs" | "logging";
   title: string;
   detail: string;
   evidence?: string;
-  impact: string;
+  why: string;
 }
 
 export interface HabitStreak {
+  id: string;
   habit: string;
   currentStreak: number;
-  bestStreak: number;
   completedToday: boolean;
 }
 
-export function generateActions(
-  glucose: GlucoseReading[],
-  sleep: SleepRecord[],
-  activity: ActivityRecord[],
-  meals: MealRecord[]
-): CoachingAction[] {
-  const actions: CoachingAction[] = [];
+export interface CoachingInput {
+  stats: GlucoseStats;
+  readings: GlucoseReading[]; // last 30 days
+  meals: MealWithResponse[]; // last 14 days, paired with glucose
+  health: DailyHealth[]; // last 30 days, any order
+  labs: LabResult[];
+  settings: UserSettings;
+  today: string; // yyyy-MM-dd in user's tz
+}
 
-  // Post-dinner spikes
-  const postDinnerReadings = glucose.filter((r) => {
-    const h = r.timestamp.getHours();
-    return h >= 19 && h <= 22 && r.value > 140;
-  });
-  if (postDinnerReadings.length > 3) {
-    const avg = Math.round(postDinnerReadings.reduce((s, r) => s + r.value, 0) / postDinnerReadings.length);
+const RANK = { high: 0, medium: 1, low: 2 };
+
+/**
+ * Rule-based coaching. Every rule checks that its own data exists before speaking,
+ * so a brand-new user sees nothing invented. Returns actions sorted by priority.
+ */
+export function generateActions(input: CoachingInput): CoachingAction[] {
+  const { stats, meals, health, labs, settings } = input;
+  const actions: CoachingAction[] = [];
+  const recentHealth = [...health].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
+
+  // --- Fasting glucose -----------------------------------------------------
+  if (stats.fasting.count30d >= 5 && stats.fasting.avg30d !== null) {
+    const a = stats.fasting.avg30d;
+    if (a >= settings.targetFastingMgdl) {
+      actions.push({
+        id: "fasting-high",
+        priority: a >= 110 ? "high" : "medium",
+        category: "glucose",
+        title: "Bring fasting glucose down",
+        detail: `Your fasting average over 30 days is ${a} mg/dL (target under ${settings.targetFastingMgdl}).`,
+        evidence: `${stats.fasting.count30d} fasting readings · ${stats.fasting.inTargetPct30d}% in target${stats.fasting.trend ? ` · trend ${stats.fasting.trend}` : ""}`,
+        why: "Fasting glucose reflects overnight liver output and insulin sensitivity. The biggest levers are an earlier, lighter dinner, 7+ hours of sleep, and a short walk after dinner.",
+      });
+    } else if (stats.fasting.trend === "improving") {
+      actions.push({
+        id: "fasting-improving",
+        priority: "low",
+        category: "glucose",
+        title: "Fasting glucose is heading the right way",
+        detail: `30-day fasting average is ${a} mg/dL and the last two weeks are lower than the two before.`,
+        why: "Consistency matters more than any single reading. Keep the routine that got you here.",
+      });
+    }
+  }
+
+  // --- Post-meal spikes ----------------------------------------------------
+  const paired = meals.filter((m) => m.response?.rise !== undefined && m.response.rise !== null);
+  const spikes = paired.filter((m) => (m.response!.rise as number) >= 40 || (m.response!.peak ?? 0) > settings.targetPostMealMgdl);
+  if (paired.length >= 3 && spikes.length >= 2) {
+    const worst = [...spikes].sort((a, b) => (b.response!.rise ?? 0) - (a.response!.rise ?? 0))[0];
     actions.push({
-      id: "post-dinner-walk",
+      id: "post-meal-walk",
       priority: "high",
+      category: "meal",
+      title: "Walk 10–15 minutes after your biggest meal",
+      detail: `${spikes.length} of your last ${paired.length} measured meals pushed glucose above ${settings.targetPostMealMgdl} or rose 40+ mg/dL.`,
+      evidence: worst ? `Largest: "${truncate(worst.description, 40)}" rose ${worst.response!.rise} mg/dL` : undefined,
+      why: "Muscles take up glucose without insulin while moving. A short walk right after eating typically trims the peak by 20–30 mg/dL.",
+    });
+  } else if (stats.postMeal.count30d >= 4 && (stats.postMeal.overTargetPct30d ?? 0) >= 50) {
+    actions.push({
+      id: "post-meal-high",
+      priority: "medium",
       category: "glucose",
-      title: "Take a 15-min walk after dinner",
-      detail: `Your post-dinner glucose averages ${avg} mg/dL this week — well above the <140 target.`,
-      evidence: `${postDinnerReadings.length} spikes detected after dinner`,
-      impact: "Walking after meals can lower post-meal glucose by 20–30 mg/dL.",
+      title: "After-meal readings are running high",
+      detail: `${stats.postMeal.overTargetPct30d}% of your after-meal readings this month were above ${settings.targetPostMealMgdl} mg/dL.`,
+      why: "Pairing a before and after reading with what you ate shows which meals drive the spikes, so you can change the meal rather than guess.",
     });
   }
 
-  // Poor sleep correlation
-  const recentSleep = sleep.slice(-7);
-  const poorNights = recentSleep.filter((s) => s.durationHours < 6);
-  if (poorNights.length >= 2) {
+  // --- Carbs ---------------------------------------------------------------
+  const carbHeavy = meals.filter((m) => (m.carbsG ?? 0) >= 60);
+  if (meals.length >= 3 && carbHeavy.length >= 2) {
     actions.push({
-      id: "sleep-consistency",
-      priority: "high",
+      id: "carb-order",
+      priority: "medium",
+      category: "meal",
+      title: "Eat protein and vegetables first",
+      detail: `${carbHeavy.length} meals in the last two weeks had 60g+ of carbs.`,
+      evidence: carbHeavy[0] ? `e.g. "${truncate(carbHeavy[0].description, 40)}" (${Math.round(carbHeavy[0].carbsG!)}g carbs)` : undefined,
+      why: "Sequencing protein and fiber before starches slows glucose absorption and can cut the post-meal rise by a quarter or more without eating less.",
+    });
+  }
+
+  // --- Sleep ---------------------------------------------------------------
+  const sleepNights = recentHealth.filter((h) => h.sleepHours != null);
+  const shortNights = sleepNights.filter((h) => (h.sleepHours ?? 0) < settings.targetSleepHours);
+  if (sleepNights.length >= 4 && shortNights.length >= 2) {
+    actions.push({
+      id: "sleep",
+      priority: shortNights.length >= 4 ? "high" : "medium",
       category: "sleep",
       title: "Protect your sleep window",
-      detail: `${poorNights.length} nights under 6h this week. Poor sleep raises fasting glucose by 10–15 mg/dL the next morning.`,
-      evidence: "Short sleep → cortisol surge → insulin resistance",
-      impact: "7–8h sleep is one of the strongest levers for fasting glucose.",
+      detail: `${shortNights.length} of the last ${sleepNights.length} nights were under ${settings.targetSleepHours} hours.`,
+      evidence: `Average ${(sleepNights.reduce((s, h) => s + (h.sleepHours ?? 0), 0) / sleepNights.length).toFixed(1)}h`,
+      why: "One short night raises next-morning fasting glucose and makes you more insulin resistant the following day. Sleep is one of the cheapest levers you have.",
     });
   }
 
-  // Low step count
-  const recentActivity = activity.slice(-7);
-  const lowStepDays = recentActivity.filter((a) => a.steps < 5000);
-  if (lowStepDays.length >= 3) {
+  // --- Steps ---------------------------------------------------------------
+  const stepDays = recentHealth.filter((h) => h.steps != null);
+  const lowDays = stepDays.filter((h) => (h.steps ?? 0) < Math.round(settings.targetSteps * 0.7));
+  if (stepDays.length >= 5 && lowDays.length >= 3) {
+    const avgSteps = Math.round(stepDays.reduce((s, h) => s + (h.steps ?? 0), 0) / stepDays.length);
     actions.push({
       id: "steps",
       priority: "medium",
       category: "activity",
-      title: "Aim for 7,000+ steps daily",
-      detail: `You had ${lowStepDays.length} days under 5,000 steps this week. Daily movement improves insulin sensitivity.`,
-      evidence: `Average: ${Math.round(recentActivity.reduce((s, a) => s + a.steps, 0) / recentActivity.length).toLocaleString()} steps/day`,
-      impact: "Each 1,000 extra steps reduces T2D risk by ~6%.",
+      title: `Aim for ${settings.targetSteps.toLocaleString()} steps most days`,
+      detail: `${lowDays.length} of the last ${stepDays.length} days were well below your step target.`,
+      evidence: `Average ${avgSteps.toLocaleString()} steps/day`,
+      why: "Daily movement improves insulin sensitivity for up to 48 hours. Spreading steps through the day beats one long session.",
     });
   }
 
-  // High-carb meals
-  const highCarbMeals = meals.filter((m) => (m.carbsG ?? 0) > 60);
-  if (highCarbMeals.length > 0) {
+  // --- Labs ----------------------------------------------------------------
+  const a1c = labs.filter((l) => l.marker === "HbA1c").sort((a, b) => b.date.localeCompare(a.date));
+  if (a1c.length) {
+    const latest = a1c[0];
+    const prev = a1c[1];
+    const delta = prev ? +(latest.value - prev.value).toFixed(1) : null;
+    const dir = delta === null ? "" : delta < 0 ? ` That is down ${Math.abs(delta)} from your previous test.` : delta > 0 ? ` That is up ${delta} from your previous test.` : " Unchanged from your previous test.";
+    if (latest.value >= 5.7) {
+      actions.push({
+        id: "a1c",
+        priority: "low",
+        category: "labs",
+        title: "Track toward HbA1c under 5.7%",
+        detail: `Your latest HbA1c was ${latest.value}%.${dir}`,
+        why: "HbA1c averages about three months of glucose. Each 0.1% drop usually takes several weeks of lower daily readings, so day-to-day habits show up here with a delay.",
+      });
+    } else {
+      actions.push({
+        id: "a1c-normal",
+        priority: "low",
+        category: "labs",
+        title: "HbA1c is in the normal range",
+        detail: `Your latest HbA1c was ${latest.value}%.${dir}`,
+        why: "Below 5.7% is the non-diabetic range. Keep the habits that got you here and re-test in 3–6 months.",
+      });
+    }
+  }
+
+  // --- Logging habits ------------------------------------------------------
+  if (stats.total > 0 && stats.fasting.daysLogged7d < 3) {
     actions.push({
-      id: "carb-awareness",
+      id: "log-fasting",
       priority: "medium",
-      category: "meal",
-      title: "Front-load protein and fiber at meals",
-      detail: "Meals with 60g+ carbs are spiking your CGM. Eating protein/veggies first blunts the glucose rise.",
-      evidence: `${highCarbMeals.length} high-carb meal(s) logged recently`,
-      impact: "Protein-first eating can cut post-meal spikes by 25–40%.",
+      category: "logging",
+      title: "Log a fasting reading most mornings",
+      detail: `You logged fasting glucose on ${stats.fasting.daysLogged7d} of the last 7 days.`,
+      why: "Fasting readings are the most comparable number day to day. Four or more a week is enough to see a real trend.",
     });
   }
 
-  // General HbA1c goal reminder
-  actions.push({
-    id: "hba1c-goal",
-    priority: "low",
-    category: "general",
-    title: "Track toward HbA1c < 5.7%",
-    detail: "Your last HbA1c was 5.9%. Consistent low-spike days add up — each 0.1% drop takes ~3 months of habit change.",
-    impact: "Getting below 5.7% reverses the prediabetes diagnosis.",
-  });
-
-  return actions.sort((a, b) => {
-    const rank = { high: 0, medium: 1, low: 2 };
-    return rank[a.priority] - rank[b.priority];
-  });
+  return actions.sort((a, b) => RANK[a.priority] - RANK[b.priority]);
 }
 
-export function computeStreaks(activity: ActivityRecord[], sleep: SleepRecord[]): HabitStreak[] {
-  const today = new Date().toISOString().slice(0, 10);
+export function computeStreaks(input: Pick<CoachingInput, "readings" | "health" | "settings" | "today">, tz: string): HabitStreak[] {
+  const { readings, health, settings, today } = input;
+  const streaks: HabitStreak[] = [];
 
-  // Post-meal walk streak (proxy: active minutes > 15)
-  let walkStreak = 0, walkBest = 0;
-  for (let i = activity.length - 1; i >= 0; i--) {
-    if (activity[i].activeMinutes >= 15) { walkStreak++; walkBest = Math.max(walkBest, walkStreak); }
-    else break;
+  // Fasting reading logged (streak may end today or yesterday without breaking)
+  const fastingDays = new Set(readings.filter((r) => r.tag === "fasting").map((r) => localDate(r.ts, tz)));
+  if (readings.length) {
+    streaks.push({
+      id: "log",
+      habit: "Fasting reading logged",
+      currentStreak: countStreak((d) => fastingDays.has(d), today),
+      completedToday: fastingDays.has(today),
+    });
   }
 
-  // Sleep streak (>= 7h)
-  let sleepStreak = 0, sleepBest = 0;
-  for (let i = sleep.length - 1; i >= 0; i--) {
-    if (sleep[i].durationHours >= 7) { sleepStreak++; sleepBest = Math.max(sleepBest, sleepStreak); }
-    else break;
+  const byDate = new Map(health.map((h) => [h.date, h]));
+  if (health.some((h) => h.steps != null)) {
+    const hit = (d: string) => (byDate.get(d)?.steps ?? 0) >= settings.targetSteps;
+    streaks.push({ id: "steps", habit: `${settings.targetSteps.toLocaleString()}+ steps`, currentStreak: countStreak(hit, today), completedToday: hit(today) });
   }
-
-  // Step streak (>= 7000)
-  let stepStreak = 0, stepBest = 0;
-  for (let i = activity.length - 1; i >= 0; i--) {
-    if (activity[i].steps >= 7000) { stepStreak++; stepBest = Math.max(stepBest, stepStreak); }
-    else break;
+  if (health.some((h) => h.sleepHours != null)) {
+    const hit = (d: string) => (byDate.get(d)?.sleepHours ?? 0) >= settings.targetSleepHours;
+    streaks.push({ id: "sleep", habit: `${settings.targetSleepHours}+ hours sleep`, currentStreak: countStreak(hit, today), completedToday: hit(today) });
   }
+  return streaks;
+}
 
-  return [
-    { habit: "Post-meal movement", currentStreak: walkStreak, bestStreak: walkBest, completedToday: (activity[activity.length - 1]?.activeMinutes ?? 0) >= 15 },
-    { habit: "7+ hours sleep", currentStreak: sleepStreak, bestStreak: sleepBest, completedToday: (sleep[sleep.length - 1]?.durationHours ?? 0) >= 7 },
-    { habit: "7,000+ steps", currentStreak: stepStreak, bestStreak: stepBest, completedToday: (activity[activity.length - 1]?.steps ?? 0) >= 7000 },
-  ];
+/** Consecutive days satisfying `hit`, counting back from today, or from yesterday if today isn't done yet. */
+function countStreak(hit: (date: string) => boolean, today: string): number {
+  let d = hit(today) ? today : shiftDate(today, -1);
+  let n = 0;
+  while (hit(d) && n < 365) {
+    n++;
+    d = shiftDate(d, -1);
+  }
+  return n;
+}
+
+function truncate(s: string, n: number) {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
