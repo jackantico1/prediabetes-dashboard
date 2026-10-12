@@ -48,3 +48,18 @@ export async function clearDemo() {
   revalidateAll();
   redirect("/settings?demo=cleared");
 }
+
+export async function deleteAccount() {
+  const user = await requireUser();
+  const { getAuth } = await import("@/lib/auth");
+  const { headers } = await import("next/headers");
+  const { getDb } = await import("@/db/client");
+  const { user: userTable } = await import("@/db/schema");
+  const { eq } = await import("drizzle-orm");
+  const auth = await getAuth();
+  // Clear the session cookie first; deleting the user cascades to sessions and all data.
+  await auth.api.signOut({ headers: await headers() });
+  const db = await getDb();
+  await db.delete(userTable).where(eq(userTable.id, user.id));
+  redirect("/login?deleted=1");
+}

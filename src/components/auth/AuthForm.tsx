@@ -14,6 +14,7 @@ export function AuthForm({ mode, googleEnabled }: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/";
+  const deleted = params.get("deleted") === "1";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -47,6 +48,8 @@ export function AuthForm({ mode, googleEnabled }: Props) {
       <h1 className="text-lg font-semibold text-slate-800">
         {mode === "signup" ? "Create your account" : "Welcome back"}
       </h1>
+
+      {deleted && mode === "login" && <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">Your account and data were deleted.</p>}
 
       {mode === "signup" && (
         <div>

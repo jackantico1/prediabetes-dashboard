@@ -8,7 +8,8 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { SignOutButton } from "@/components/settings/SignOutButton";
-import { clearDemo, loadDemo, saveTargets } from "./actions";
+import { clearDemo, deleteAccount, loadDemo, saveTargets } from "./actions";
+import { DeleteAccountButton } from "@/components/settings/DeleteAccountButton";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -81,6 +82,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </form>
           )}
         </div>
+      </Card>
+      <Card title="Your data" subtitle="It's yours. Take it with you or delete it entirely.">
+        <div className="flex flex-wrap gap-3 items-center">
+          <a href="/api/export" className="btn-secondary" download>Download everything (JSON)</a>
+          <DeleteAccountButton action={deleteAccount} />
+        </div>
+        <p className="text-xs text-slate-500 mt-3">Deleting your account removes every reading, meal, scan, lab result, synced day and the Garmin connection. There is no undo.</p>
       </Card>
     </>
   );
